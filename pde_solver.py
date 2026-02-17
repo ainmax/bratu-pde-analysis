@@ -402,11 +402,12 @@ class PDESolver:
         return int((t + 1) / self.half_grid_size)
 
 
-pde_solver = PDESolver(
-    grid_size=1 / 32,
-    bvp_tolerance=1e-6,
-    convergence_tolerance=1e-3,
-    target_lambda=-0.2
-)
+if __name__ == "__main__":
+    pde_solver = PDESolver(
+        grid_size=1 / 32,
+        bvp_tolerance=1e-6,
+        convergence_tolerance=1e-3,
+        target_lambda=-0.2
+    )
 
-pde_solver.solve()
+    pde_solver.solve()
