@@ -1,3 +1,5 @@
+import math
+
 import torch
 from typing import Callable, Tuple
 
@@ -113,8 +115,11 @@ class BVPSolver:
             # if not ok or info["cond_est"] > 1e12:
             #     raise ValueError(f"Bad Jacobian: {info}")
 
+            if math.isnan(boundary_value[0].item()):
+                raise ValueError(f"Невязка слишком большая на итерации {iteration}.")
+
             if torch.max(torch.abs(boundary_jacobian)) < 1e-12:
-                raise ValueError(f"Якобиан почти вырожденный на итерации {iteration}")
+                raise ValueError(f"Якобиан почти нулевой на итерации {iteration}.")
 
             state = state - torch.linalg.inv(boundary_jacobian) @ boundary_value
         else:
