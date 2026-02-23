@@ -105,7 +105,6 @@ class BVPSolver:
             print(f"Iteration {iteration} started")
 
             boundary_value, boundary_jacobian = self._shoot(state)
-            print(boundary_value)
 
             if torch.max(torch.abs(boundary_value)) < tol:
                 print(f"Converged in {iteration + 1} iterations")
@@ -121,7 +120,7 @@ class BVPSolver:
             if torch.max(torch.abs(boundary_jacobian)) < 1e-12:
                 raise ValueError(f"Якобиан почти нулевой на итерации {iteration}.")
 
-            state = state - torch.linalg.inv(boundary_jacobian) @ boundary_value
+            state = state - torch.linalg.solve(boundary_jacobian, boundary_value)
         else:
             raise RuntimeError(f"За {max_iter} итераций не сошлось")
 

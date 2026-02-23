@@ -4,15 +4,15 @@ import math
 import torch
 
 import matplotlib
-matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from bvp_solver import BVPSolver
 
+matplotlib.use('Agg')
 torch.set_default_dtype(torch.float64)
 
 
-def make_plot(
+def make_approximation_plot(
         *,
         x_grid: list[float],
         f_values: list[list[float]],
@@ -39,6 +39,21 @@ def make_plot(
     plt.close()
 
 
+def make_continuation_plot(data: list[tuple[float, float]]):
+    fig, axes = plt.subplots(1, 1, figsize=(5, 5))
+
+    axes.plot([e[0] for e in data], [e[1] for e in data], 'b-', label='f', linewidth=2)
+    axes.set_xlabel("lambda", fontsize=12)
+    axes.set_ylabel("norm", fontsize=12)
+    axes.legend(fontsize=10)
+    axes.grid(True, alpha=0.3)
+    axes.set_title(f'Continuation plot', fontsize=14)
+
+    plt.tight_layout()
+    plt.savefig(f"plot-c.png", dpi=150)
+    print(f"График сохранен: plot-c.png")
+    plt.close()
+
 # Equation -\Delta u(x, y) + \lambda e^{u(x, y) = 0}
 class PDESolver:
     def __init__(
@@ -50,6 +65,7 @@ class PDESolver:
             initial_lambda: float,
             default_lambda_step: float,
             target_lambda: float,
+            lambda_tolerance: float,
             n: int
     ):
         self.grid: list[float] = []
@@ -67,11 +83,14 @@ class PDESolver:
         self.g_tensor_prev_prev: list[list[torch.Tensor]] = [[], [], []]
 
         self.bvp_tolerance: float = bvp_tolerance
-        self.convergence_tolerance = convergence_tolerance
+        self.convergence_tolerance: float = convergence_tolerance
 
         self.target_lambda: float = target_lambda
         self.default_lambda_step: float = default_lambda_step
         self.initial_lambda: float = initial_lambda
+        self.lambda_tolerance: float = lambda_tolerance
+
+        self.continuation_data: list[tuple[float, float]] = []
 
     def _setup(self):
         self.grid = [
@@ -114,13 +133,13 @@ class PDESolver:
         self.f_tensor[2] = [calc_basis_pp(x) for x in self.half_grid]
         self.g_tensor[2] = [calc_basis_pp(y) for y in self.half_grid]
 
-        self.f_tensor_prev = copy.deepcopy(self.f_tensor)
-        self.g_tensor_prev = copy.deepcopy(self.g_tensor)
-        self.f_tensor_prev_prev = copy.deepcopy(self.f_tensor)
-        self.g_tensor_prev_prev = copy.deepcopy(self.g_tensor)
+        self.f_tensor_prev = [[torch.tensor([0] * self.n) for _ in self.half_grid] for _ in range(3)]
+        self.g_tensor_prev = [[torch.tensor([0] * self.n) for _ in self.half_grid] for _ in range(3)]
+        self.f_tensor_prev_prev = [[torch.tensor([0] * self.n) for _ in self.half_grid] for _ in range(3)]
+        self.g_tensor_prev_prev = [[torch.tensor([0] * self.n) for _ in self.half_grid] for _ in range(3)]
 
         # log
-        print("Setup completed")
+        print("Setup is completed.")
 
     def _calc_divergence_norm(self, lambda_: float):
         integral: float = 0.0
@@ -149,11 +168,14 @@ class PDESolver:
     def _do_lambda_continuation(self):
         lambda_ = self.initial_lambda
         step = self.default_lambda_step
-        step_prev = self.default_lambda_step
-        step_prev_prev = self.default_lambda_step
+        step_prev = step
+        step_prev_prev = step
 
         is_target_achieved: bool = False
         iteration_index: int = 0
+
+        self._pass_iterations(lambda_)
+        lambda_ += step
 
         f_backup: list[list[torch.Tensor]] = copy.deepcopy(self.f_tensor)
         f_prev_backup: list[list[torch.Tensor]] = copy.deepcopy(self.f_tensor_prev)
@@ -177,11 +199,11 @@ class PDESolver:
                 self._pass_iterations(lambda_)
             except Exception as e:
                 print(e)
-                if lambda_ == self.initial_lambda:
-                    raise ValueError("Bad initial lambda value.")
+
                 lambda_ -= step
                 step /= 1.5
                 lambda_ += step
+
                 self.f_tensor = copy.deepcopy(f_backup)
                 self.f_tensor_prev = copy.deepcopy(f_prev_backup)
                 self.f_tensor_prev_prev = copy.deepcopy(f_prev_prev_backup)
@@ -198,7 +220,7 @@ class PDESolver:
             g_prev_backup = copy.deepcopy(self.g_tensor_prev)
             g_prev_prev_backup = copy.deepcopy(self.g_tensor_prev_prev)
 
-            make_plot(
+            make_approximation_plot(
                 x_grid=self.half_grid,
                 f_values=[[e[k].item() for e in self.f_tensor[0]] for k in range(self.n)],
                 g_values=[[e[k].item() for e in self.g_tensor[0]] for k in range(self.n)],
@@ -206,12 +228,28 @@ class PDESolver:
                 file_index=-(iteration_index + 1),
             )
 
-            lambda_ += step
-
             step_prev_prev = step_prev
             step_prev = step
-            step *= 1.1
+            step *= 1.5
             step = max(step, self.target_lambda - lambda_)
+
+            # log
+            print("=" * 100)
+            print(f"lambda = {lambda_} is passed.")
+
+            self.continuation_data.append(
+                (
+                    lambda_,
+                    torch.inner(self.f_tensor[0][self._idx(0)], self.g_tensor[0][self._idx(0)]).item()
+                )
+            )
+
+            make_continuation_plot(self.continuation_data)
+
+            if abs(lambda_ - self.target_lambda) < self.lambda_tolerance:
+                is_target_achieved = True
+
+            lambda_ += step
 
             iteration_index += 1
 
@@ -257,7 +295,7 @@ class PDESolver:
             # log
             print("Iteration by f started")
 
-            make_plot(
+            make_approximation_plot(
                 x_grid=self.half_grid,
                 f_values=[[e[k].item() for e in self.f_tensor[0]] for k in range(self.n)],
                 g_values=[[e[k].item() for e in self.g_tensor[0]] for k in range(self.n)],
@@ -357,7 +395,7 @@ class PDESolver:
                     self.g_tensor[1][i][k] *= g_multiplier
                     self.g_tensor[2][i][k] *= g_multiplier
 
-            make_plot(
+            make_approximation_plot(
                 x_grid=self.half_grid,
                 f_values=[[e[k].item() for e in self.f_tensor[0]] for k in range(self.n)],
                 g_values=[[e[k].item() for e in self.g_tensor[0]] for k in range(self.n)],
@@ -473,12 +511,13 @@ class PDESolver:
 
 if __name__ == "__main__":
     pde_solver = PDESolver(
-        grid_size=1 / 32,
+        grid_size=1 / 64,
         bvp_tolerance=1e-6,
         convergence_tolerance=1e-4,
         initial_lambda=-0.001,
-        default_lambda_step=-0.5,
+        default_lambda_step=-0.1,
         target_lambda=-6,
+        lambda_tolerance=1e-1,
         n=2
     )
 
