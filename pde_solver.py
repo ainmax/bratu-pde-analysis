@@ -18,23 +18,24 @@ def make_approximation_plot(
         f_values: list[list[float]],
         g_values: list[list[float]],
         n: int,
+        suffix: str,
         file_index: int
 ):
     fig, axes = plt.subplots(n + 1, 2, figsize=(14, 3 * (n + 1)))
 
     for i in range(n):
-        axes[i][0].plot(x_grid, f_values[i], 'b-', label='f', linewidth=2)
+        axes[i][0].plot(x_grid, f_values[i], 'b-', label='f', linewidth=1)
         axes[i][0].legend(fontsize=10)
         axes[i][0].grid(True, alpha=0.3)
-        axes[i][0].set_title(f'f{i + 1} approximation', fontsize=14)
+        axes[i][0].set_title(f'f{i + 1} approximation', fontsize=10)
 
-        axes[i][1].plot(x_grid, g_values[i], 'b-', label='Решение', linewidth=2)
+        axes[i][1].plot(x_grid, g_values[i], 'b-', label='Решение', linewidth=1)
         axes[i][1].legend(fontsize=10)
         axes[i][1].grid(True, alpha=0.3)
-        axes[i][1].set_title(f'g{i + 1} approximation', fontsize=14)
+        axes[i][1].set_title(f'g{i + 1} approximation', fontsize=10)
 
     plt.tight_layout()
-    plt.savefig(f"plot{file_index}.png", dpi=150)
+    plt.savefig(f"plot-{suffix}{file_index}.png", dpi=150)
     print(f"График сохранен: plot{file_index}.png")
     plt.close()
 
@@ -42,15 +43,16 @@ def make_approximation_plot(
 def make_continuation_plot(data: list[tuple[float, float]]):
     fig, axes = plt.subplots(1, 1, figsize=(5, 5))
 
-    axes.plot([e[0] for e in data], [e[1] for e in data], 'b-', label='f', linewidth=2)
+    axes.plot([e[0] for e in data], [e[1] for e in data], 'b-', label='f', linewidth=1)
     axes.set_xlabel("lambda", fontsize=12)
     axes.set_ylabel("norm", fontsize=12)
     axes.legend(fontsize=10)
     axes.grid(True, alpha=0.3)
     axes.set_title(f'Continuation plot', fontsize=14)
+    axes.set_aspect("equal")
 
     plt.tight_layout()
-    plt.savefig(f"plot-c.png", dpi=150)
+    plt.savefig(f"plot-c.png", dpi=300)
     print(f"График сохранен: plot-c.png")
     plt.close()
 
@@ -63,9 +65,11 @@ class PDESolver:
             bvp_tolerance: float,
             convergence_tolerance: float,
             initial_lambda: float,
-            default_lambda_step: float,
-            target_lambda: float,
-            lambda_tolerance: float,
+            initial_lambda_step: float,
+            max_lambda_step: float,
+            limit_tolerance: float,
+            initial_norm_step: float,
+            max_norm_step: float,
             n: int
     ):
         self.grid: list[float] = []
@@ -82,13 +86,16 @@ class PDESolver:
         self.g_tensor_prev: list[list[torch.Tensor]] = [[], [], []]
         self.g_tensor_prev_prev: list[list[torch.Tensor]] = [[], [], []]
 
-        self.bvp_tolerance: float = bvp_tolerance
-        self.convergence_tolerance: float = convergence_tolerance
+        self.bvp_tolerance: float = abs(bvp_tolerance)
+        self.convergence_tolerance: float = abs(convergence_tolerance)
 
-        self.target_lambda: float = target_lambda
-        self.default_lambda_step: float = default_lambda_step
+        self.initial_lambda_step: float = initial_lambda_step
+        self.max_lambda_step: float = abs(max_lambda_step)
         self.initial_lambda: float = initial_lambda
-        self.lambda_tolerance: float = lambda_tolerance
+        self.limit_tolerance: float = abs(limit_tolerance)
+
+        self.initial_norm_step: float = initial_norm_step
+        self.max_norm_step: float = abs(max_norm_step)
 
         self.continuation_data: list[tuple[float, float]] = []
 
@@ -163,18 +170,18 @@ class PDESolver:
         print(f"Process with n = {self.n} started")
 
         self._setup()
-        self._do_lambda_continuation()
+        self._do_parameter_continuation()
 
-    def _do_lambda_continuation(self):
+    def _do_parameter_continuation(self):
         lambda_ = self.initial_lambda
-        step = self.default_lambda_step
+        step = self.initial_lambda_step
         step_prev = step
         step_prev_prev = step
 
-        is_target_achieved: bool = False
+        is_limit_achieved: bool = False
         iteration_index: int = 0
 
-        self._pass_iterations(lambda_)
+        self._pass_lambda_iterations(lambda_)
         lambda_ += step
 
         f_backup: list[list[torch.Tensor]] = copy.deepcopy(self.f_tensor)
@@ -184,7 +191,7 @@ class PDESolver:
         g_prev_backup: list[list[torch.Tensor]] = copy.deepcopy(self.g_tensor_prev)
         g_prev_prev_backup: list[list[torch.Tensor]] = copy.deepcopy(self.g_tensor_prev_prev)
 
-        while not is_target_achieved:
+        while not is_limit_achieved:
             # log
             print("=" * 50)
             print(f"Process for lambda = {lambda_} and step = {step} is started.")
@@ -196,7 +203,7 @@ class PDESolver:
             )
 
             try:
-                self._pass_iterations(lambda_)
+                self._pass_lambda_iterations(lambda_)
             except Exception as e:
                 print(e)
 
@@ -225,13 +232,14 @@ class PDESolver:
                 f_values=[[e[k].item() for e in self.f_tensor[0]] for k in range(self.n)],
                 g_values=[[e[k].item() for e in self.g_tensor[0]] for k in range(self.n)],
                 n=self.n,
-                file_index=-(iteration_index + 1),
+                suffix="subcrit",
+                file_index=-(iteration_index + 1)
             )
 
             step_prev_prev = step_prev
             step_prev = step
             step *= 1.5
-            step = max(step, self.target_lambda - lambda_)
+            step = math.copysign(min(abs(step), self.max_lambda_step), step)
 
             # log
             print("=" * 100)
@@ -246,11 +254,103 @@ class PDESolver:
 
             make_continuation_plot(self.continuation_data)
 
-            if abs(lambda_ - self.target_lambda) < self.lambda_tolerance:
-                is_target_achieved = True
+            if abs(step) < self.limit_tolerance:
+                is_limit_achieved = True
+                print(200 * "=")
+                print("Limit by lambda is achieved")
+            else:
+                lambda_ += step
+                iteration_index += 1
 
-            lambda_ += step
+        # Change continuation variable
+        print("Starting norm continuation")
 
+        lambda_ = torch.tensor([self.continuation_data[-1][0]])
+        norm = torch.tensor([self.continuation_data[-1][1]])
+
+        step = self.initial_norm_step
+        step_prev = step
+        step_prev_prev = step
+
+        iteration_index: int = 0
+
+        self._pass_norm_iterations(lambda_, norm)
+        norm += step
+
+        f_backup: list[list[torch.Tensor]] = copy.deepcopy(self.f_tensor)
+        f_prev_backup: list[list[torch.Tensor]] = copy.deepcopy(self.f_tensor_prev)
+        f_prev_prev_backup: list[list[torch.Tensor]] = copy.deepcopy(self.f_tensor_prev_prev)
+        g_backup: list[list[torch.Tensor]] = copy.deepcopy(self.g_tensor)
+        g_prev_backup: list[list[torch.Tensor]] = copy.deepcopy(self.g_tensor_prev)
+        g_prev_prev_backup: list[list[torch.Tensor]] = copy.deepcopy(self.g_tensor_prev_prev)
+        lambda_backup: torch.Tensor = lambda_.clone()
+
+        while True:
+            # log
+            print("=" * 50)
+            print(f"Process for lambda = {lambda_}, norm = {norm} and step = {step} is started.")
+
+            self._extrapolate_variables(
+                delta=step,
+                delta_prev=step_prev,
+                delta_prev_prev=step_prev_prev
+            )
+
+            try:
+                lambda_ = self._pass_norm_iterations(lambda_, norm).clone()
+            except Exception as e:
+                print(e)
+
+                norm -= step
+                step /= 1.5
+                norm += step
+
+                self.f_tensor = copy.deepcopy(f_backup)
+                self.f_tensor_prev = copy.deepcopy(f_prev_backup)
+                self.f_tensor_prev_prev = copy.deepcopy(f_prev_prev_backup)
+                self.g_tensor = copy.deepcopy(g_backup)
+                self.g_tensor_prev = copy.deepcopy(g_prev_backup)
+                self.g_tensor_prev_prev = copy.deepcopy(g_prev_prev_backup)
+                lambda_ = lambda_backup.clone()
+
+                continue
+
+            f_backup = copy.deepcopy(self.f_tensor)
+            f_prev_backup = copy.deepcopy(self.f_tensor_prev)
+            f_prev_prev_backup = copy.deepcopy(self.f_tensor_prev_prev)
+            g_backup = copy.deepcopy(self.g_tensor)
+            g_prev_backup = copy.deepcopy(self.g_tensor_prev)
+            g_prev_prev_backup = copy.deepcopy(self.g_tensor_prev_prev)
+            lambda_backup = lambda_.clone()
+
+            make_approximation_plot(
+                x_grid=self.half_grid,
+                f_values=[[e[k].item() for e in self.f_tensor[0]] for k in range(self.n)],
+                g_values=[[e[k].item() for e in self.g_tensor[0]] for k in range(self.n)],
+                n=self.n,
+                suffix="supercrit",
+                file_index=-(iteration_index + 1)
+            )
+
+            step_prev_prev = step_prev
+            step_prev = step
+            step *= 1.5
+            step = math.copysign(min(abs(step), self.max_norm_step), step)
+
+            # log
+            print("=" * 100)
+            print(f"lambda = {lambda_} and norm = {norm} are passed.")
+
+            self.continuation_data.append(
+                (
+                    lambda_.item(),
+                    torch.inner(self.f_tensor[0][self._idx(0)], self.g_tensor[0][self._idx(0)]).item()
+                )
+            )
+
+            make_continuation_plot(self.continuation_data)
+
+            norm += step
             iteration_index += 1
 
     def _extrapolate_variables(
@@ -285,7 +385,7 @@ class PDESolver:
         self.f_tensor = new_f_tensor
         self.g_tensor = new_g_tensor
 
-    def _pass_iterations(self, lambda_: float):
+    def _pass_lambda_iterations(self, lambda_: float):
         def boundary(a: float, b: float, a_state: torch.Tensor, b_state: torch.Tensor) -> torch.Tensor:
             return torch.cat((a_state[:self.n], b_state[:self.n]), dim=0)
 
@@ -295,54 +395,32 @@ class PDESolver:
             # log
             print("Iteration by f started")
 
-            make_approximation_plot(
-                x_grid=self.half_grid,
-                f_values=[[e[k].item() for e in self.f_tensor[0]] for k in range(self.n)],
-                g_values=[[e[k].item() for e in self.g_tensor[0]] for k in range(self.n)],
-                n=self.n,
-                file_index=2 * iteration_index,
-            )
+            # make_approximation_plot(
+            #     x_grid=self.half_grid,
+            #     f_values=[[e[k].item() for e in self.f_tensor[0]] for k in range(self.n)],
+            #     g_values=[[e[k].item() for e in self.g_tensor[0]] for k in range(self.n)],
+            #     n=self.n,
+            #     suffix="subcrit",
+            #     file_index=2 * iteration_index
+            # )
 
             last_f: torch.Tensor = torch.stack(self.f_tensor[0], dim=0)
             last_g: torch.Tensor = torch.stack(self.g_tensor[0], dim=0)
 
             # solve bvp by f
 
-            # def func_a_g(y_: float, state_a: torch.Tensor):
-            #     return torch.outer(self.g_tensor[0][self._idx(y_)], self.g_tensor[0][self._idx(y_)])
-            #
-            # solver_a = ODESolver(func_a_g)
-            # matrix_a: torch.Tensor = solver_a.solve_by_end(
-            #     init_state=torch.zeros(self.n, self.n),
-            #     a=-1,
-            #     b=1,
-            #     grid_size=self.grid_size
-            # )
-            # matrix_a = torch.linalg.inv(matrix_a)
-            #
-            # def func_b_g(y_: float, state_a: torch.Tensor):
-            #     return -torch.outer(self.g_tensor[0][self._idx(y_)], self.g_tensor[2][self._idx(y_)])
-            #
-            # solver_b = ODESolver(func_b_g)
-            # matrix_b: torch.Tensor = solver_b.solve_by_end(
-            #     init_state=torch.zeros(self.n, self.n),
-            #     a=-1,
-            #     b=1,
-            #     grid_size=self.grid_size
-            # )
+            g_tensor_stack = torch.stack(self.g_tensor[0])
+            gpp_tensor_stack = torch.stack(self.g_tensor[2])
 
-            G_tensor = torch.stack(self.g_tensor[0])
-            Gpp_tensor = torch.stack(self.g_tensor[2])
-
-            matrix_a: torch.Tesor = torch.sum(torch.bmm(G_tensor.unsqueeze(2), G_tensor.unsqueeze(1)), dim=0) * self.half_grid_size
+            matrix_a: torch.Tesor = torch.sum(torch.bmm(g_tensor_stack.unsqueeze(2), g_tensor_stack.unsqueeze(1)), dim=0) * self.half_grid_size
             matrix_a = torch.linalg.inv(matrix_a)
 
-            matrix_b: torch.Tesor = -1 * torch.sum(torch.bmm(G_tensor.unsqueeze(2), Gpp_tensor.unsqueeze(1)), dim=0) * self.half_grid_size
+            matrix_b: torch.Tesor = -1 * torch.sum(torch.bmm(g_tensor_stack.unsqueeze(2), gpp_tensor_stack.unsqueeze(1)), dim=0) * self.half_grid_size
 
             def func_f(x_: float, state: torch.Tensor) -> torch.Tensor:
                 f_at_x = state[:self.n]
-                u_all_y = torch.mv(G_tensor, f_at_x)
-                integrand = G_tensor * torch.exp(u_all_y).unsqueeze(1)
+                u_all_y = torch.mv(g_tensor_stack, f_at_x)
+                integrand = g_tensor_stack * torch.exp(u_all_y).unsqueeze(1)
                 matrix_c = torch.sum(integrand, dim=0) * self.half_grid_size
                 primes = matrix_a @ (matrix_b @ f_at_x + lambda_ * matrix_c)
 
@@ -362,7 +440,7 @@ class PDESolver:
                     self.f_tensor[1][self._idx(0)]
                 ),
                 dim=0
-            ).requires_grad_(True)
+            )
             f_solution: torch.Tensor = bvp_solver_.solve(
                 init_state=bvp_init_state,
                 tol=self.bvp_tolerance,
@@ -395,53 +473,30 @@ class PDESolver:
                     self.g_tensor[1][i][k] *= g_multiplier
                     self.g_tensor[2][i][k] *= g_multiplier
 
-            make_approximation_plot(
-                x_grid=self.half_grid,
-                f_values=[[e[k].item() for e in self.f_tensor[0]] for k in range(self.n)],
-                g_values=[[e[k].item() for e in self.g_tensor[0]] for k in range(self.n)],
-                n=self.n,
-                file_index=2 * iteration_index + 1,
-            )
+            # make_approximation_plot(
+            #     x_grid=self.half_grid,
+            #     f_values=[[e[k].item() for e in self.f_tensor[0]] for k in range(self.n)],
+            #     g_values=[[e[k].item() for e in self.g_tensor[0]] for k in range(self.n)],
+            #     n=self.n,
+            #     suffix="subcrit",
+            #     file_index=2 * iteration_index + 1
+            # )
 
             # log
             print("Iteration by g started")
 
-            # def func_a_f(x_: float, state_a: torch.Tensor):
-            #     return torch.outer(self.f_tensor[0][self._idx(x_)], self.f_tensor[0][self._idx(x_)])
-            #
-            # solver_a = ODESolver(func_a_f)
-            # matrix_a: torch.Tensor = solver_a.solve_by_end(
-            #     init_state=torch.zeros(self.n, self.n),
-            #     a=-1,
-            #     b=1,
-            #     grid_size=self.grid_size
-            # )
-            # print(torch.max(torch.abs(matrix_a - matrix_a_new)))
-            #
-            # def func_b_f(x_: float, state_a: torch.Tensor):
-            #     return -torch.outer(self.f_tensor[0][self._idx(x_)], self.f_tensor[2][self._idx(x_)])
-            #
-            # solver_b = ODESolver(func_b_f)
-            # matrix_b: torch.Tensor = solver_b.solve_by_end(
-            #     init_state=torch.zeros(self.n, self.n),
-            #     a=-1,
-            #     b=1,
-            #     grid_size=self.grid_size
-            # )
-            # print(torch.max(torch.abs(matrix_b_new - matrix_b)))
+            f_tensor_stack = torch.stack(self.f_tensor[0])
+            fpp_tensor_stack = torch.stack(self.f_tensor[2])
 
-            F_tensor = torch.stack(self.f_tensor[0])
-            Fpp_tensor = torch.stack(self.f_tensor[2])
-
-            matrix_a: torch.Tesor = torch.sum(torch.bmm(F_tensor.unsqueeze(2), F_tensor.unsqueeze(1)), dim=0) * self.half_grid_size
+            matrix_a: torch.Tesor = torch.sum(torch.bmm(f_tensor_stack.unsqueeze(2), f_tensor_stack.unsqueeze(1)), dim=0) * self.half_grid_size
             matrix_a = torch.linalg.inv(matrix_a)
 
-            matrix_b: torch.Tesor = -1 * torch.sum(torch.bmm(F_tensor.unsqueeze(2), Fpp_tensor.unsqueeze(1)), dim=0) * self.half_grid_size
+            matrix_b: torch.Tesor = -1 * torch.sum(torch.bmm(f_tensor_stack.unsqueeze(2), fpp_tensor_stack.unsqueeze(1)), dim=0) * self.half_grid_size
 
             def func_g(y_: float, state: torch.Tensor) -> torch.Tensor:
                 g_at_y = state[:self.n]
-                u_all_x = torch.mv(F_tensor, g_at_y)
-                integrand = F_tensor * torch.exp(u_all_x).unsqueeze(1)
+                u_all_x = torch.mv(f_tensor_stack, g_at_y)
+                integrand = f_tensor_stack * torch.exp(u_all_x).unsqueeze(1)
                 matrix_c = torch.sum(integrand, dim=0) * self.half_grid_size
                 primes = matrix_a @ (matrix_b @ g_at_y + lambda_ * matrix_c)
 
@@ -461,7 +516,7 @@ class PDESolver:
                     self.g_tensor[1][self._idx(0)]
                 ),
                 dim=0
-            ).requires_grad_(True)
+            )
             g_solution: torch.Tensor = bvp_solver_.solve(
                 init_state=bvp_init_state,
                 tol=self.bvp_tolerance,
@@ -504,6 +559,196 @@ class PDESolver:
             if max(f_difference, g_difference) < self.convergence_tolerance:
                 break
 
+    def _pass_norm_iterations(self, lambda_: torch.Tensor, norm: torch.Tensor) -> torch.Tensor:
+        def boundary(a: float, b: float, a_state: torch.Tensor, b_state: torch.Tensor) -> torch.Tensor:
+            return torch.cat((a_state[:self.n], b_state[:self.n]), dim=0)
+
+        iteration_index = -1
+        while True:
+            iteration_index += 1
+            # log
+            print("Iteration by f started")
+
+            # make_approximation_plot(
+            #     x_grid=self.half_grid,
+            #     f_values=[[e[k].item() for e in self.f_tensor[0]] for k in range(self.n)],
+            #     g_values=[[e[k].item() for e in self.g_tensor[0]] for k in range(self.n)],
+            #     n=self.n,
+            #     suffix="supercrit",
+            #     file_index=2 * iteration_index
+            # )
+
+            last_f: torch.Tensor = torch.stack(self.f_tensor[0], dim=0)
+            last_g: torch.Tensor = torch.stack(self.g_tensor[0], dim=0)
+
+            # solve bvp by f
+
+            g_tensor_stack = torch.stack(self.g_tensor[0])
+            gpp_tensor_stack = torch.stack(self.g_tensor[2])
+
+            matrix_a: torch.Tesor = torch.sum(torch.bmm(g_tensor_stack.unsqueeze(2), g_tensor_stack.unsqueeze(1)), dim=0) * self.half_grid_size
+            matrix_a = torch.linalg.inv(matrix_a)
+
+            matrix_b: torch.Tesor = -1 * torch.sum(torch.bmm(g_tensor_stack.unsqueeze(2), gpp_tensor_stack.unsqueeze(1)), dim=0) * self.half_grid_size
+
+            def func_f(x_: float, state: torch.Tensor) -> torch.Tensor:
+                f_at_x = state[:self.n]
+                u_all_y = torch.mv(g_tensor_stack, f_at_x)
+                integrand = g_tensor_stack * torch.exp(u_all_y).unsqueeze(1)
+                matrix_c = torch.sum(integrand, dim=0) * self.half_grid_size
+                primes = matrix_a @ (matrix_b @ f_at_x + state[-1] * matrix_c)
+
+                return torch.cat((state[self.n:-1], primes, torch.tensor([0])), dim=0)
+
+            def f_init_boundary(state: torch.Tensor) -> torch.Tensor:
+                return torch.inner(state[:self.n], g_tensor_stack[self._idx(0)]).unsqueeze(0) - norm
+
+            bvp_solver_ = BVPSolver(
+                f=func_f,
+                boundary=boundary,
+                init_boundary=f_init_boundary,
+                a=-1,
+                b=1,
+                m=0,
+                grid_size=self.half_grid_size
+            )
+            bvp_init_state = torch.cat(
+                (
+                    self.f_tensor[0][self._idx(0)],
+                    self.f_tensor[1][self._idx(0)],
+                    lambda_
+                ),
+                dim=0
+            )
+            f_solution: torch.Tensor = bvp_solver_.solve(
+                init_state=bvp_init_state,
+                tol=self.bvp_tolerance,
+                max_iter=10
+            )
+
+            for i in range(len(self.half_grid)):
+                self.f_tensor[0][i] = f_solution[i][:self.n]
+                self.f_tensor[1][i] = f_solution[i][self.n:-1]
+                self.f_tensor[2][i] = func_f(self.half_grid[i], f_solution[i])[self.n:-1]
+
+            lambda_ = f_solution[0][-1].unsqueeze(0)
+
+            # log
+            print(f"New lambda value = {lambda_}")
+            print("f variables updated")
+
+            f_tensor = torch.abs(torch.stack(self.f_tensor[0], dim=0))
+            g_tensor = torch.abs(torch.stack(self.g_tensor[0], dim=0))
+
+            for i in range(len(self.half_grid)):
+                for k in range(self.n):
+                    f_max: float = torch.max(f_tensor[:, k]).item()
+                    g_max: float = torch.max(g_tensor[:, k]).item()
+                    f_multiplier = math.sqrt(g_max / f_max)
+                    g_multiplier = math.sqrt(f_max / g_max)
+                    self.f_tensor[0][i][k] *= f_multiplier
+                    self.f_tensor[1][i][k] *= f_multiplier
+                    self.f_tensor[2][i][k] *= f_multiplier
+                    self.g_tensor[0][i][k] *= g_multiplier
+                    self.g_tensor[1][i][k] *= g_multiplier
+                    self.g_tensor[2][i][k] *= g_multiplier
+
+            # make_approximation_plot(
+            #     x_grid=self.half_grid,
+            #     f_values=[[e[k].item() for e in self.f_tensor[0]] for k in range(self.n)],
+            #     g_values=[[e[k].item() for e in self.g_tensor[0]] for k in range(self.n)],
+            #     n=self.n,
+            #     suffix="supercrit",
+            #     file_index=2 * iteration_index + 1
+            # )
+
+            # log
+            print("Iteration by g started")
+
+            f_tensor_stack = torch.stack(self.f_tensor[0])
+            fpp_tensor_stack = torch.stack(self.f_tensor[2])
+
+            matrix_a: torch.Tesor = torch.sum(torch.bmm(f_tensor_stack.unsqueeze(2), f_tensor_stack.unsqueeze(1)), dim=0) * self.half_grid_size
+            matrix_a = torch.linalg.inv(matrix_a)
+
+            matrix_b: torch.Tesor = -1 * torch.sum(torch.bmm(f_tensor_stack.unsqueeze(2), fpp_tensor_stack.unsqueeze(1)), dim=0) * self.half_grid_size
+
+            def func_g(y_: float, state: torch.Tensor) -> torch.Tensor:
+                g_at_y = state[:self.n]
+                u_all_x = torch.mv(f_tensor_stack, g_at_y)
+                integrand = f_tensor_stack * torch.exp(u_all_x).unsqueeze(1)
+                matrix_c = torch.sum(integrand, dim=0) * self.half_grid_size
+                primes = matrix_a @ (matrix_b @ g_at_y + state[-1] * matrix_c)
+
+                return torch.cat((state[self.n:-1], primes, torch.tensor([0])), dim=0)
+
+            def g_init_boundary(state: torch.Tensor) -> torch.Tensor:
+                return torch.inner(state[:self.n], f_tensor_stack[self._idx(0)]).unsqueeze(0) - norm
+
+            bvp_solver_ = BVPSolver(
+                f=func_g,
+                boundary=boundary,
+                init_boundary=g_init_boundary,
+                a=-1,
+                b=1,
+                m=0,
+                grid_size=self.half_grid_size
+            )
+            bvp_init_state = torch.cat(
+                (
+                    self.g_tensor[0][self._idx(0)],
+                    self.g_tensor[1][self._idx(0)],
+                    lambda_
+                ),
+                dim=0
+            )
+            g_solution: torch.Tensor = bvp_solver_.solve(
+                init_state=bvp_init_state,
+                tol=self.bvp_tolerance,
+                max_iter=10
+            )
+
+            for i in range(len(self.half_grid)):
+                self.g_tensor[0][i] = g_solution[i][:self.n]
+                self.g_tensor[1][i] = g_solution[i][self.n:-1]
+                self.g_tensor[2][i] = func_g(self.half_grid[i], g_solution[i])[self.n:-1]
+
+            lambda_ = g_solution[0][-1].unsqueeze(0)
+
+            # log
+            print(f"New lambda value = {lambda_}")
+            print("g variables updated")
+
+            f_tensor = torch.abs(torch.stack(self.f_tensor[0], dim=0))
+            g_tensor = torch.abs(torch.stack(self.g_tensor[0], dim=0))
+
+            for i in range(len(self.half_grid)):
+                for k in range(self.n):
+                    f_max: float = torch.max(f_tensor[:, k]).item()
+                    g_max: float = torch.max(g_tensor[:, k]).item()
+                    f_multiplier = math.sqrt(g_max / f_max)
+                    g_multiplier = math.sqrt(f_max / g_max)
+                    self.f_tensor[0][i][k] *= f_multiplier
+                    self.f_tensor[1][i][k] *= f_multiplier
+                    self.f_tensor[2][i][k] *= f_multiplier
+                    self.g_tensor[0][i][k] *= g_multiplier
+                    self.g_tensor[1][i][k] *= g_multiplier
+                    self.g_tensor[2][i][k] *= g_multiplier
+
+            f_difference = torch.max(torch.abs(torch.stack(self.f_tensor[0], dim=0) - last_f)).item()
+            g_difference = torch.max(torch.abs(torch.stack(self.g_tensor[0], dim=0) - last_g)).item()
+
+            print(
+                f_difference,
+                g_difference,
+                self._calc_divergence_norm(lambda_.item())
+            )
+
+            if max(f_difference, g_difference) < self.convergence_tolerance:
+                break
+
+        return lambda_
+
 
     def _idx(self, t: float):
         return int((t + 1) / self.half_grid_size)
@@ -515,10 +760,12 @@ if __name__ == "__main__":
         bvp_tolerance=1e-6,
         convergence_tolerance=1e-4,
         initial_lambda=-0.001,
-        default_lambda_step=-0.1,
-        target_lambda=-6,
-        lambda_tolerance=1e-1,
-        n=2
+        initial_lambda_step=-0.1,
+        max_lambda_step=0.12,
+        limit_tolerance=1e-4,
+        initial_norm_step=1e-2,
+        max_norm_step=0.25,
+        n=3
     )
 
     pde_solver.solve()

@@ -16,6 +16,7 @@ class BVPSolver:
             *,
             f: Callable,
             boundary: Callable,
+            init_boundary: Callable | None = None,
             a: float,
             b: float,
             m: float,
@@ -23,6 +24,7 @@ class BVPSolver:
     ):
         self.f: Callable = f
         self.boundary: Callable = boundary
+        self.init_boundary: Callable | None = init_boundary
         self.a: float = a
         self.b: float = b
         self.m: float = m
@@ -47,7 +49,17 @@ class BVPSolver:
             grid_size=self.grid_size
         )
 
-        boundary_value: torch.Tensor = self.boundary(self.a, self.b, self.a_state[-1], self.b_state[-1])
+        boundary_value: torch.Tensor = torch.tensor([])
+        if self.init_boundary is not None:
+            boundary_value = torch.cat(
+                (
+                    self.boundary(self.a, self.b, self.a_state[-1], self.b_state[-1]),
+                    self.init_boundary(mid_state)
+                ),
+                dim=0
+            )
+        else:
+            boundary_value: torch.Tensor = self.boundary(self.a, self.b, self.a_state[-1], self.b_state[-1])
 
         jacobian = torch.zeros(len(boundary_value), len(mid_state))
         for i in range(len(mid_state)):
@@ -56,38 +68,6 @@ class BVPSolver:
             mid_state.grad.data.zero_()
 
         return boundary_value, jacobian
-
-    def check_jacobian_svd(self, J: torch.Tensor, *, rtol=1e-12, atol=1e-14):
-        """
-        Проверяет вырожденность/плохую обусловленность по сингулярным числам.
-        rtol — относительный порог к максимальной сингулярной.
-        atol — абсолютный порог.
-        Возвращает (ok, info_dict).
-        """
-        # SVDvals устойчивее, чем det/cond через inverse
-        s = torch.linalg.svdvals(J)  # sorted desc
-        s_max = s[0]
-        s_min = s[-1]
-
-        # Численный ранг: сколько сингулярных чисел "существенные"
-        tol = torch.maximum(atol * torch.ones((), dtype=J.dtype, device=J.device),
-                            rtol * s_max)
-        rank = int((s > tol).sum().item())
-
-        # оценка cond; если s_min==0, cond=inf
-        cond = (s_max / s_min).item() if s_min > 0 else float("inf")
-
-        ok = (rank == min(J.shape)) and torch.isfinite(s).all().item()
-
-        info = {
-            "shape": tuple(J.shape),
-            "s_max": s_max.item(),
-            "s_min": s_min.item(),
-            "rank": rank,
-            "tol": tol.item(),
-            "cond_est": cond,
-        }
-        return ok, info
 
     def solve(
             self,
@@ -109,10 +89,6 @@ class BVPSolver:
             if torch.max(torch.abs(boundary_value)) < tol:
                 print(f"Converged in {iteration + 1} iterations")
                 break
-
-            # ok, info = self.check_jacobian_svd(boundary_jacobian, rtol=1e-12, atol=1e-14)
-            # if not ok or info["cond_est"] > 1e12:
-            #     raise ValueError(f"Bad Jacobian: {info}")
 
             if math.isnan(boundary_value[0].item()):
                 raise ValueError(f"Невязка слишком большая на итерации {iteration}.")

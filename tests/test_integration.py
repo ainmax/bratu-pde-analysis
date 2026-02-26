@@ -61,7 +61,7 @@ def test_pde_solver_small_lambda_trivial_solution(mock_plot):
     With target_lambda=-0.001 and n=1, max|u| must be < 0.1 (near-trivial solution).
     """
     s = _make_pde(grid_size=1 / 8, n=1, target_lambda=-0.001)
-    s._pass_iterations(-0.001)
+    s._pass_lambda_iterations(-0.001)
 
     u_vals = [
         torch.dot(s.f[s._idx(x)], s.g[s._idx(y)]).abs().item()
@@ -78,7 +78,7 @@ def test_pde_solver_symmetry(mock_plot):
     The Bratu PDE on the square is symmetric in x and y.
     """
     s = _make_pde(grid_size=1 / 8, n=1, target_lambda=-0.001)
-    s._pass_iterations(-0.001)
+    s._pass_lambda_iterations(-0.001)
 
     max_diff = 0.0
     for xi, x in enumerate(s.half_grid):
@@ -94,7 +94,7 @@ def test_pde_solver_symmetry(mock_plot):
 def test_divergence_norm_after_full_solve(mock_plot):
     """PDE residual norm after convergence must be < 0.05."""
     s = _make_pde(grid_size=1 / 8, n=1, target_lambda=-0.001)
-    s._pass_iterations(-0.001)
+    s._pass_lambda_iterations(-0.001)
     norm = s._calc_divergence_norm(-0.001)
     assert norm < 0.05, f"Divergence norm after solve = {norm:.4f} >= 0.05"
 
@@ -122,7 +122,7 @@ def test_alternating_iteration_convergence_monotone(mock_plot):
         original_print(*args, **kwargs)
 
     # Just verify it runs to completion without error
-    s._pass_iterations(-0.001)
+    s._pass_lambda_iterations(-0.001)
 
     # Verify the final state is self-consistent (no NaN)
     for fi in s.f:

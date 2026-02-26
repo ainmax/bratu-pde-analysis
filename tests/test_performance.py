@@ -98,7 +98,7 @@ def test_bench_pde_solver_one_lambda_step(benchmark):
     s._setup()
 
     with patch("pde_solver.make_plot"):
-        benchmark(s._pass_iterations, -0.001)
+        benchmark(s._pass_lambda_iterations, -0.001)
 
     assert benchmark.stats["mean"] < 30.0, (
         f"Mean time {benchmark.stats['mean']:.2f}s >= 30s threshold"
