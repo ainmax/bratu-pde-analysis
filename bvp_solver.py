@@ -88,6 +88,7 @@ class BVPSolver:
 
             if torch.max(torch.abs(boundary_value)) < tol:
                 print(f"Converged in {iteration + 1} iterations")
+                print("Max real part of Jacobian matrix eigen value:", torch.max(torch.linalg.eigvals(boundary_jacobian).real))
                 break
 
             if math.isnan(boundary_value[0].item()):

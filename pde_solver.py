@@ -63,6 +63,7 @@ class PDESolver:
             *,
             grid_size: float,
             bvp_tolerance: float,
+            max_iter: int,
             convergence_tolerance: float,
             initial_lambda: float,
             initial_lambda_step: float,
@@ -87,6 +88,7 @@ class PDESolver:
         self.g_tensor_prev_prev: list[list[torch.Tensor]] = [[], [], []]
 
         self.bvp_tolerance: float = abs(bvp_tolerance)
+        self.max_iter = max_iter
         self.convergence_tolerance: float = abs(convergence_tolerance)
 
         self.initial_lambda_step: float = initial_lambda_step
@@ -444,7 +446,7 @@ class PDESolver:
             f_solution: torch.Tensor = bvp_solver_.solve(
                 init_state=bvp_init_state,
                 tol=self.bvp_tolerance,
-                max_iter=10
+                max_iter=self.max_iter
             )
 
             for i in range(len(self.half_grid)):
@@ -520,7 +522,7 @@ class PDESolver:
             g_solution: torch.Tensor = bvp_solver_.solve(
                 init_state=bvp_init_state,
                 tol=self.bvp_tolerance,
-                max_iter=10
+                max_iter=self.max_iter
             )
 
             for i in range(len(self.half_grid)):
@@ -623,7 +625,7 @@ class PDESolver:
             f_solution: torch.Tensor = bvp_solver_.solve(
                 init_state=bvp_init_state,
                 tol=self.bvp_tolerance,
-                max_iter=10
+                max_iter=self.max_iter
             )
 
             for i in range(len(self.half_grid)):
@@ -705,7 +707,7 @@ class PDESolver:
             g_solution: torch.Tensor = bvp_solver_.solve(
                 init_state=bvp_init_state,
                 tol=self.bvp_tolerance,
-                max_iter=10
+                max_iter=self.max_iter
             )
 
             for i in range(len(self.half_grid)):
@@ -756,16 +758,17 @@ class PDESolver:
 
 if __name__ == "__main__":
     pde_solver = PDESolver(
-        grid_size=1 / 64,
-        bvp_tolerance=1e-6,
-        convergence_tolerance=1e-4,
+        grid_size=1 / 128,
+        bvp_tolerance=1e-10,
+        max_iter=40,
+        convergence_tolerance=1e-8,
         initial_lambda=-0.001,
-        initial_lambda_step=-0.1,
-        max_lambda_step=0.12,
-        limit_tolerance=1e-4,
+        initial_lambda_step=-0.05,
+        max_lambda_step=0.1,
+        limit_tolerance=1e-3,
         initial_norm_step=1e-2,
-        max_norm_step=0.25,
-        n=3
+        max_norm_step=0.1,
+        n=2
     )
 
     pde_solver.solve()
