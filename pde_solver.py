@@ -87,7 +87,7 @@ class PDESolver:
                 integral += (
                     (
                         torch.dot(self.state.repr.functions['h']['vpp'][ix][:n], self.state.repr.functions['g']['v'][iy][:n]) +
-                        torch.dot(self.state.repr.functions['g']['vpp'][iy][:n], self.state.repr.functions['h']['v'][ix][:n]) -
+                        torch.dot(self.state.repr.functions['g']['vpp'][iy][:n], self.state.repr.functions['h']['v'][ix][:n]) +
                         self.state.lambda_ * torch.exp(torch.dot(
                             self.state.repr.functions['h']['v'][ix][:n],
                             self.state.repr.functions['g']['v'][iy][:n]
@@ -266,14 +266,14 @@ class PDESolver:
                         u_all_y = const_tensor_stack[:, 0] * state[0]
                         integrand = const_tensor_stack[:, 0] * torch.exp(u_all_y)
                         matrix_c = torch.sum(integrand, dim=0) * self.state.repr.subgrid_size
-                        prime = matrix_a[0, 0:1] * (matrix_b[0, 0] * state[0] + self.state.lambda_ * matrix_c)
+                        prime = matrix_a[0, 0:1] * (matrix_b[0, 0] * state[0] - self.state.lambda_ * matrix_c)
                         return torch.cat((state[1:2], prime), dim=0)
                     else:
                         main_func_at_x = torch.cat((self.state.repr.functions[main_func]['v'][self.state.repr.idx(x_)][:n - 1], state[0:1]), dim=0)
                         u_all_y = torch.mv(const_tensor_stack[:, :n], main_func_at_x)
                         integrand = const_tensor_stack[:, :n] * torch.exp(u_all_y).unsqueeze(1)
                         matrix_c = torch.sum(integrand, dim=0) * self.state.repr.subgrid_size
-                        prime = matrix_a[n - 1:, :] @ (torch.mv(matrix_b[:n, :n], main_func_at_x).unsqueeze(1) + self.state.lambda_ * matrix_c.unsqueeze(1)).squeeze(dim=1)
+                        prime = matrix_a[n - 1:, :] @ (torch.mv(matrix_b[:n, :n], main_func_at_x).unsqueeze(1) - self.state.lambda_ * matrix_c.unsqueeze(1)).squeeze(dim=1)
                         return torch.cat((state[1:2], prime), dim=0)
 
                 mid_point = (self.state.repr.t0 + self.state.repr.t1) / 2
@@ -283,7 +283,7 @@ class PDESolver:
                     a=self.state.repr.t0,
                     b=self.state.repr.t1,
                     m=mid_point,
-                    grid_size=self.state.repr.subgrid_size
+                    grid_size=self.state.repr.grid_size
                 )
                 bvp_init_state = torch.cat(
                     (
@@ -351,7 +351,7 @@ class PDESolver:
                     u_all_y = torch.mv(const_tensor_stack, main_func_at_x)
                     integrand = const_tensor_stack * torch.exp(u_all_y).unsqueeze(1)
                     matrix_c = torch.sum(integrand, dim=0) * self.state.repr.subgrid_size
-                    primes = matrix_a @ (matrix_b @ main_func_at_x + state[-1] * matrix_c)
+                    primes = matrix_a @ (matrix_b @ main_func_at_x - state[-1] * matrix_c)
 
                     return torch.cat((state[self.n:-1], primes, torch.tensor([0])), dim=0)
 
@@ -369,7 +369,7 @@ class PDESolver:
                     a=self.state.repr.t0,
                     b=self.state.repr.t1,
                     m=mid_point,
-                    grid_size=self.state.repr.subgrid_size
+                    grid_size=self.state.repr.grid_size
                 )
                 bvp_init_state = torch.cat(
                     (
@@ -414,7 +414,7 @@ class PDESolver:
     def _make_continuation_plot(self):
         fig, axes = plt.subplots(1, 1, figsize=(5, 5))
 
-        axes.plot([e[1] for e in self.continuation_data], [-e[0] for e in self.continuation_data], 'b-', label='f', linewidth=1)
+        axes.plot([e[1] for e in self.continuation_data], [e[0] for e in self.continuation_data], 'b-', label='f', linewidth=1)
         axes.set_xlabel('u(0, 0)', fontsize=12)
         axes.set_ylabel('lambda', fontsize=12)
         axes.legend(fontsize=10)

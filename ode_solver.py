@@ -90,3 +90,30 @@ class ODESolver:
             next_state = self._calc_next_state(t, states[i % 2], h)
             states[(i + 1) % 2] = next_state
         return states[steps_count % 2]
+
+    def solve_on_subgrid(
+        self,
+        *,
+        init_state: torch.Tensor,
+        a: float,
+        b: float,
+        grid_size: float
+    ) -> torch.Tensor:
+        """
+        Calculates ODE solution RK4 approximation on subgrid at segment [a, b]
+        :param init_state: initial state; tensor shaped with (n, 1)
+        :param a: segment begin (orientation matters)
+        :param b: segment end (orientation matters)
+        :param grid_size: distance between neighboring grid points
+        :return: tensor with states at each point of subgrid; tensor shaped with (M, n), where M - number of subgrid points at segment
+        """
+
+        steps_count: int = round(abs(b - a) / grid_size)
+        states: list[torch.Tensor] = [init_state]
+        h: float = grid_size * math.copysign(1.0, b - a)
+        for i in range(steps_count):
+            t = a + h * i
+            states.append(states[-1] + h * self.f(t, states[-1]) / 2)
+            next_state = self._calc_next_state(t, states[-2], h)
+            states.append(next_state)
+        return torch.stack(states, dim=0)
