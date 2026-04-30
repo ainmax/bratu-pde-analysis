@@ -113,23 +113,9 @@ class BVPSolver:
             print(f'Iteration {iteration} started')
 
             boundary_value, boundary_jacobian = self._shoot(state)
+            print(boundary_value)
 
             if torch.max(torch.abs(boundary_value)) < tol:
-                ode_solver = ODESolver(self.f)
-                mid_state = state.clone().detach().requires_grad_(True)
-                self.a_state = ode_solver.solve_on_subgrid(
-                    init_state=mid_state,
-                    a=self.m,
-                    b=self.a,
-                    grid_size=self.grid_size
-                )
-                self.b_state = ode_solver.solve_on_subgrid(
-                    init_state=mid_state,
-                    a=self.m,
-                    b=self.b,
-                    grid_size=self.grid_size
-                )
-
                 print(f'Converged in {iteration + 1} iterations')
                 u, s, vh = torch.linalg.svd(boundary_jacobian)
                 sigma_min = s[-1]
@@ -153,4 +139,18 @@ class BVPSolver:
         else:
             raise RuntimeError(f'За {max_iter} итераций не сошлось')
 
+        ode_solver = ODESolver(self.f)
+        mid_state = state.clone().detach().requires_grad_(True)
+        self.a_state = ode_solver.solve_on_subgrid(
+            init_state=mid_state,
+            a=self.m,
+            b=self.a,
+            grid_size=self.grid_size
+        )
+        self.b_state = ode_solver.solve_on_subgrid(
+            init_state=mid_state,
+            a=self.m,
+            b=self.b,
+            grid_size=self.grid_size
+        )
         return torch.cat((self.a_state.flip(dims=[0]), self.b_state[1:]), dim=0).detach()

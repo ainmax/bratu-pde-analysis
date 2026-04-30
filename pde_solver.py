@@ -132,6 +132,10 @@ class PDESolver:
 
             self._pass_lambda_iterations(n)
 
+        self._shift_states()
+        self._shift_states()
+        self._shift_states()
+
         while not is_limit_achieved:
             if abs(step) < self.limit_tolerance:
                 # log
@@ -196,7 +200,7 @@ class PDESolver:
 
         while True:
             norm += step
-            self._extrapolate_state()
+            # self._extrapolate_state()
 
             # log
             print('=' * 50)
